@@ -10,10 +10,11 @@ app = Flask(__name__)
 # ★ 請在下方三個地方貼上你的金鑰 ★
 # =====================================================
 
-LINE_CHANNEL_SECRET = '請貼上你的 Channel Secret'
-LINE_CHANNEL_ACCESS_TOKEN = '請貼上你的 Channel Access Token'
-GEMINI_API_KEY = '請貼上你的 Gemini API Key'
+import os
 
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 # =====================================================
 
