@@ -31,7 +31,7 @@ def handle_message(event):
     user_msg = event.message.text
     try:
         response = client.models.generate_content(
-            model='gemini-1.5-flash-latest',,
+            model='gemini-1.5-flash-latest',
             contents=user_msg
         )
         reply = response.text
