@@ -18,20 +18,20 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# 初始化 Google GenAI 用戶端 (使用最新 google-genai SDK)
+# 初始化 Google GenAI 用戶端
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ==================== 核心 Prompt 設計 ====================
+# ==================== 核心 Prompt 設計 (純情境 B：解題提示) ====================
 SYSTEM_INSTRUCTION = """
-你是一位專業的「考古題與時事分析引導 AI 助理」。
-當使用者輸入任何題目、長篇新聞或計算題時，你必須嚴格遵守以下引導歷程，絕對不能直接提供最終答案或完整算式：
+你是一位經驗豐富、充滿耐心的「解題提示 AI 教學助理」。
+當學生詢問任何學科的題目時，你的目標是帶領學生釐清觀念、自主破題，絕對不能直接提供標準答案或完整程式碼。請嚴格執行以下四階段引導歷程：
 
-1. 【分析與拆解】：先用一句話指出這個問題屬於哪一個學科章節或核心考點（例如：基礎數學的百分比、程式設計的變數宣告），並幫使用者抓出內文中的「已知條件」與「要求目標」。
-2. 【尋找工具箱】：詢問或提示使用者相關的概念、公式或定理，引導他自己想起來。
-3. 【嘗試第一步】：每次回覆只推進一個步驟，鼓勵使用者動手列出第一步算式或邏輯。
-4. 【舉一反三】：如果使用者成功解出，最後提供一個微調條件的「類題」讓他練習鞏固觀念。
+1. 【診斷問題與拆解題目】：請學生用自己的話描述題目想求什麼，並指出題目給了哪些已知條件。
+2. 【連結已知觀念】：提示相關的概念、公式、定理或邏輯架構，引導學生從大腦尋找工具箱，但不直接套用。
+3. 【嘗試第一步】：鼓勵學生寫出初步的列式或邏輯。如果卡住，用反問引導他發現矛盾，每次回覆只推進一個步驟。
+4. 【觀念總結與內化】：當學生得出正確答案後，要求他用一句話總結解題核心，並給出一個微調條件的類似觀念提問讓他舉一反三。
 
-注意：語氣要直觀有力、充滿鼓勵。如果使用者持續索取答案，請溫和地拒絕並給予更簡單的提示。字數保持精簡（150字內）。
+注意：用肯定、直觀的語言建立信心。如果學生索要答案，請溫和拒絕並給予更微小的提示。每次回覆保持精簡，字數不超過 150 字。
 """
 
 # ==================== Webhook 進入點 ====================
@@ -52,11 +52,11 @@ def handle_message(event):
     user_msg = event.message.text
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # 初始化預設回覆，防止內容為空導致 LINE 崩潰
-    reply = "助理正在閱讀這段內容，請稍等..."
+    # 預設回覆
+    reply = "助理正在思考如何引導你，請稍等..."
     
     try:
-        # 呼叫 Gemini-2.5-flash，並帶入核心引導指令
+        # 呼叫 Gemini-2.5-flash，載入解題引導指令
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=user_msg,
@@ -66,23 +66,24 @@ def handle_message(event):
             )
         )
         
-        # 安全檢查：確保 Gemini 有回傳文字且不為空
+        # 安全檢查
         if response and response.text:
             reply = response.text
         else:
-            reply = "這段資訊量較大，但沒問題！請告訴我，你想驗證其中的哪個數字或核心觀念？"
+            # 修正 1：移除時事分析字眼，改回純粹的解題引導
+            reply = "這題看起來很有挑戰性！先別急著要答案，你可以告訴我，題目目前給了你哪些已知線索嗎？"
             
     except Exception as e:
-        # 異常攔截：即使 API 報錯或文字超長卡死，也給予符合引導核心的「安全罐頭回覆」
         print(f'Gemini error: {e}', file=sys.stderr)
-        reply = "這段新聞的資訊量很大！讓我們聚焦在核心：魏董事長宣稱股價『成長了 1.5 倍』。請告訴我你準備好用什麼公式來驗證它了嗎？"
+        # 修正 2：移除台積電與魏董事長的硬編碼，改為通用的解題防錯防護
+        reply = "助理的腦袋剛剛稍微卡住了一下！我們回到這題，你能試著列出你的第一步算式或想法讓我看看嗎？"
     
-    # 【對話紀錄蒐集】將紀錄壓縮成單行輸出至標準日誌 (sys.stdout)
+    # 【對話紀錄蒐集】
     log_record = f"[{timestamp}] [{user_id}] -> Q: {user_msg.replace('\n', ' ')[:50]}... | A: {reply.replace('\n', ' ')}"
     print(log_record, file=sys.stdout)
     sys.stdout.flush()
 
-    # 安全地將訊息回傳給 LINE 使用者
+    # 回傳 LINE 訊息
     try:
         line_bot_api.reply_message(
             event.reply_token,
