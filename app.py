@@ -10,7 +10,7 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# 從環境變數取得金鑰
+# ==================== 配置環境變數 ====================
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -18,10 +18,11 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# 初始化 Google GenAI 戶端
+# 初始化 Google GenAI 用戶端 (使用最新 google-genai SDK)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 設計整合情境 B 與 C 的蘇格拉底式引導提示詞
+# ==================== 核心 Prompt 設計 ====================
+# 強制 Gemini 執行蘇格拉底式引導，整合情境 B (教學引導) 與 情境 C (考古題/時事分析)
 SYSTEM_INSTRUCTION = """
 你是一位專業的「考古題分析與解題引導 AI 助理」。
 當使用者輸入任何題目、考古題或計算題時，你必須嚴格遵守以下引導歷程，絕對不能直接提供最終答案或完整算式：
@@ -34,6 +35,7 @@ SYSTEM_INSTRUCTION = """
 注意：語氣要直觀有力、充滿鼓勵。如果使用者持續索取答案，請溫和地拒絕並給予更簡單的提示。字數保持精簡（150字內）。
 """
 
+# ==================== Webhook 進入點 ====================
 @app.route("/webhook", methods=['POST'])
 def webhook():
     signature = request.headers['X-Line-Signature']
@@ -44,6 +46,7 @@ def webhook():
         abort(400)
     return 'OK'
 
+# ==================== 訊息處理與紀錄蒐集 ====================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
@@ -51,7 +54,7 @@ def handle_message(event):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     try:
-        # 使用最新的 google-genai SDK 呼叫 gemini-2.5-flash，並帶入 system_instruction
+        # 呼叫 Gemini-2.5-flash，並帶入核心引導指令
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=user_msg,
@@ -62,16 +65,17 @@ def handle_message(event):
         )
         reply = response.text
     except Exception as e:
+        # 異常處理：在伺服器端印出詳細錯誤日誌，避免前端崩潰
         print(f'Gemini error: {e}', file=sys.stderr)
-        reply = f'助理思考時發生錯誤：{str(e)}'
+        reply = f'助理思考時發生錯誤，請稍後再試。'
     
-    # 【對話紀錄蒐集】將紀錄格式化輸出至標準輸出，供日後分析使用
-    # 格式：[時間] [User_ID] -> 提問: xxx | 回應: ooo
+    # 【對話紀錄蒐集】格式化輸出至伺服器標準日誌 (sys.stdout) 供日後分析使用
+    # 將訊息中的換行替換為空格，確保一筆對話紀錄剛好佔用日誌中的一行
     log_record = f"[{timestamp}] [{user_id}] -> Q: {user_msg.replace('\n', ' ')} | A: {reply.replace('\n', ' ')}"
     print(log_record, file=sys.stdout)
     sys.stdout.flush()
 
-    # 回傳訊息給 LINE 使用者
+    # 將 AI 的引導回應透過 LINE 回傳給使用者
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply)
