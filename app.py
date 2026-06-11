@@ -41,11 +41,10 @@ def handle_message(event):
     for keyword in trigger_keywords:
         if user_msg.startswith(keyword):
             is_triggered = True
-            # 擷取關鍵字後方的實際內容
             target_content = user_msg[len(keyword):].strip()
             break
 
-    # 2. 未觸發關鍵字，直接中斷執行（機器人保持沉默）
+    # 2. 未觸發關鍵字，直接中斷執行
     if not is_triggered:
         return
 
@@ -62,7 +61,7 @@ def handle_message(event):
         輸入內容：{target_content}
         
         強制規則：
-        1. 絕對不准使用星號 (*) 或任何 Markdown 符號排版。
+        1. 絕對不准使用星號或任何 Markdown 符號排版。
         2. 絕對不准產生開場白或結語，輸出必須冷靜客觀。
         3. 請先評估「輸入內容」的資訊量：
            - 若內容空泛、缺乏具體細節（如：只有人名、無意義字詞），請在第一行輸出 [GUIDE]，第二行直接點出欠缺的要素，要求補充。
@@ -80,9 +79,9 @@ def handle_message(event):
         (若無具體重點則寫：無延伸重點)
         """
         
-        # 替換為 1.5-flash，避開 2.5-flash 的 503 伺服器高載錯誤
+        # 改回正確的 2.5 版模型
         response = client.models.generate_content(
-            model='gemini-1.5-flash', 
+            model='gemini-2.5-flash', 
             contents=prompt,
             config=types.GenerateContentConfig(temperature=0.1) 
         )
@@ -90,7 +89,6 @@ def handle_message(event):
         if response and response.text:
             raw_reply = response.text.strip()
             
-            # 解析 AI 判斷結果：是引導補充，還是正式筆記
             if "[GUIDE]" in raw_reply:
                 reply_text = raw_reply.replace("[GUIDE]", "").strip()
             else:
@@ -101,7 +99,12 @@ def handle_message(event):
     except Exception as e:
         error_msg = str(e)
         print(f"API Error: {error_msg}", file=sys.stderr)
-        reply_text = f"系統連線異常。\n錯誤詳情：{error_msg}"
+        
+        # 新增 503 塞車防護機制
+        if "503" in error_msg:
+            reply_text = "目前 AI 伺服器負載較高，請稍等一分鐘後再傳送一次。"
+        else:
+            reply_text = f"系統連線異常。\n錯誤詳情：{error_msg}"
 
     # 5. 將最終結果發送回 LINE
     line_bot_api.reply_message(
