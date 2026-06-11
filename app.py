@@ -30,6 +30,7 @@ def webhook():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_msg = event.message.text.strip()
+    reply_text = ""
 
     # 1. 觸發指令與內容分離
     trigger_keywords = ["/筆記", "整理：", "幫我讀"]
@@ -42,17 +43,19 @@ def handle_message(event):
             target_content = user_msg[len(keyword):].strip()
             break
 
-    # 沒呼叫指令，機器人保持沉默
+    # 2. 防呆攔截：沒呼叫指令
     if not is_triggered:
-        return
-
-    # 2. 第一層防呆：有指令但完全沒內容
-    if not target_content:
-        reply_text = "請提供具體內容。\n範例：/筆記 明天下午三點開會，討論行銷預算，記得帶報表。"
+        reply_text = "我收到訊息了。若需要整理筆記，請在文字前加上關鍵字。\n範例：/筆記 明天下午開會討論預算。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    # 3. 核心處理邏輯
+    # 3. 防呆攔截：有指令但完全沒內容
+    if not target_content:
+        reply_text = "請提供具體內容。\n範例：/筆記 今天客戶說功能要修改。"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        return
+
+    # 4. 核心處理邏輯
     try:
         prompt = f"""
         任務：獨立閱讀並結構化產出筆記，或給予補充提示。
@@ -62,18 +65,18 @@ def handle_message(event):
         1. 絕對不准使用星號或任何 Markdown 符號排版。
         2. 絕對不准產生開場白或結語。
         3. 請先評估「輸入內容」的資訊量：
-           - 若內容毫無邏輯、極度空泛或缺乏具體細節（如：只有人名、單純的情緒發洩、無意義字詞），請在第一行輸出 [GUIDE]，第二行直接點出欠缺的要素，要求使用者補充（例如：缺乏具體事件，請補充人事時地物或待辦事項）。
+           - 若內容毫無邏輯、極度空泛或缺乏具體細節，請在第一行輸出 [GUIDE]，第二行直接點出欠缺的要素，要求使用者補充（例如：缺乏具體事件，請補充相關人事時地物）。
            - 若內容有實質意義，請直接依照以下格式輸出筆記：
         
         【主題定調】
-        (用一個詞定義，如：會議、待辦、隨記、程式碼)
+        (用一個詞定義內容屬性)
         
         【重點摘要】
         (一句話精準總結)
         
         【筆記梳理】
-        1. (擷取重點1)
-        2. (擷取重點2)
+        1. (重點1)
+        2. (重點2)
         """
         
         response = client.models.generate_content(
@@ -82,24 +85,23 @@ def handle_message(event):
             config=types.GenerateContentConfig(temperature=0.1) 
         )
         
+        # 捕捉 AI 生成結果，防止空值或安全審查阻擋
         if response and response.text:
             raw_reply = response.text.strip()
             
-            # 解析 AI 的判斷結果
             if "[GUIDE]" in raw_reply:
-                # 資訊不足，給予 AI 產生的引導提示
                 reply_text = raw_reply.replace("[GUIDE]", "").strip()
             else:
-                # 資訊充足，給出整理好的筆記
                 reply_text = raw_reply
         else:
-            reply_text = "分析中斷。請確認輸入的文字是否過短或包含無法解析的符號。"
+            reply_text = "分析中斷。內容可能涉及安全過濾，或 API 回傳空白。"
 
     except Exception as e:
-        print(f"API Error: {e}", file=sys.stderr)
-        # 捕捉真正的系統錯誤，並給出實用的備用方案
-        reply_text = "系統連線異常，無法製作筆記。請先將這段文字複製備份，稍後再試。"
+        error_msg = str(e)
+        print(f"API Error: {error_msg}", file=sys.stderr)
+        reply_text = f"系統連線異常，無法製作筆記。\n真實報錯原因：{error_msg}"
 
+    # 無論上面發生什麼事，最後絕對會執行這行，確保不會已讀不回
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_text)
