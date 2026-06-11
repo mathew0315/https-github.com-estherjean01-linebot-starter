@@ -20,21 +20,20 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 user_sessions = {}
 
 def get_ai_response(prompt):
-    """加入 try-except，防止 API 異常，並回傳帶有 [ERROR] 標籤的字串供主程式辨識"""
+    """加入 try-except，發生異常時統一回傳 [ERROR] 標籤"""
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash', # 若持續報錯，可嘗試改為 'gemini-1.5-flash' 或 'gemini-2.0-flash'
+            model='gemini-2.5-flash', 
             contents=prompt,
             config=types.GenerateContentConfig(temperature=0.2) 
         )
         if response and response.text:
             return response.text.strip()
         else:
-            return "[ERROR] AI 回傳為空，可能是被安全機制阻擋了，請換個說法試試。"
+            return "[ERROR]"
     except Exception as e:
-        # 真正的報錯原因會印在這裡，請查看伺服器後台 Log
         print(f"API Error: {e}", file=sys.stderr)
-        return "[ERROR] 哎呀，API 連線似乎遇到一點阻礙。請稍後再試一次！"
+        return "[ERROR]"
 
 @app.route("/webhook", methods=['POST'])
 def webhook():
@@ -54,7 +53,7 @@ def handle_message(event):
     if user_msg == "重新開始":
         if user_id in user_sessions:
             del user_sessions[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="狀態已重置。請丟出你想挑戰的新題目或新聞："))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="狀態已重置。請丟出你想挑戰的新題目："))
         return
 
     if user_id not in user_sessions:
@@ -87,34 +86,32 @@ def handle_message(event):
             """
             raw_reply = get_ai_response(prompt)
             
-            # 攔截並過濾 ERROR 標籤
             if "[ERROR]" in raw_reply:
-                reply_text = raw_reply.replace("[ERROR]", "").strip()
+                reply_text = "連線遇到一點亂流，但沒關係。\n請再傳送一次你的「題目」，我們重新拆解！"
             else:
                 reply_text = raw_reply
                 session["history"] += f"題目：{user_msg}\nAI提問：{reply_text}\n"
                 session["state"] = 1
 
         # ----------------------------------------------------
-        # 狀態 1：驗證選擇 (加入模糊比對與隱藏狀態碼)
+        # 狀態 1：驗證選擇
         # ----------------------------------------------------
         elif current_state == 1:
             prompt = f"""
             對話紀錄：{session['history']}
             使用者選擇了：【{user_msg}】
             
-            請判斷他的選擇是否正確。必須允許模糊比對（如大小寫 b=B，或語意接近即可算對）。
+            請判斷他的選擇是否正確。必須允許模糊比對（大小寫或語意接近即可）。
             
             【強制輸出格式】
             第一行必須且只能是狀態碼：正確寫 [PASS]，錯誤寫 [FAIL]。
             第二行開始寫你的回覆（絕對不能使用星號 * 排版）。
             
             - 若 [FAIL]：一針見血點出為什麼行不通，請他重選。
-            - 若 [PASS]：下一行加上標題「【嘗試第一步】」，請他代入數字計算。把計算權交給他。
+            - 若 [PASS]：下一行加上標題「【嘗試第一步】」，請他代入數字計算。
             """
             raw_reply = get_ai_response(prompt)
             
-            # 解析狀態碼，並確保消除所有系統標籤
             if "[PASS]" in raw_reply:
                 reply_text = raw_reply.replace("[PASS]", "").strip()
                 session["history"] += f"使用者回答：{user_msg}\nAI回覆：{reply_text}\n"
@@ -123,7 +120,8 @@ def handle_message(event):
                 reply_text = raw_reply.replace("[FAIL]", "").strip()
                 session["history"] += f"使用者回答：{user_msg}\nAI回覆：{reply_text}\n"
             else:
-                reply_text = raw_reply.replace("[ERROR]", "").strip()
+                # 攔截 ERROR 或 AI 漏印標籤的狀況，提示進度還在
+                reply_text = "伺服器剛剛恍神了，但你的解題進度都還在！\n請再輸入一次你剛剛選的「選項」，我們接續上一部。"
 
         # ----------------------------------------------------
         # 狀態 2：驗證計算結果
@@ -133,18 +131,17 @@ def handle_message(event):
             對話紀錄：{session['history']}
             使用者算出的結果是：【{user_msg}】
             
-            請判斷計算是否正確。允許合理的誤差或單位未標示，只要數值意思對就給過。
+            請判斷計算是否正確。允許合理誤差或單位未標示。
             
             【強制輸出格式】
             第一行必須且只能是狀態碼：正確寫 [PASS]，錯誤寫 [FAIL]。
             第二行開始寫你的回覆（絕對不能使用星號 * 排版）。
             
             - 若 [FAIL]：直接點出盲點，請他重算。
-            - 若 [PASS]：下一行加上標題「【觀念總結與驗證】」，俐落總結關鍵。接著出一個「💡 終點挑戰（舉一反三）」的微調陷阱題，請他接招。
+            - 若 [PASS]：下一行加上標題「【觀念總結與驗證】」，俐落總結關鍵。接著出一個「終點挑戰（舉一反三）」的微調陷阱題，請他接招。
             """
             raw_reply = get_ai_response(prompt)
             
-            # 解析狀態碼，並確保消除所有系統標籤
             if "[PASS]" in raw_reply:
                 reply_text = raw_reply.replace("[PASS]", "").strip()
                 session["history"] += f"使用者回答：{user_msg}\nAI回覆：{reply_text}\n"
@@ -153,7 +150,7 @@ def handle_message(event):
                 reply_text = raw_reply.replace("[FAIL]", "").strip()
                 session["history"] += f"使用者回答：{user_msg}\nAI回覆：{reply_text}\n"
             else:
-                reply_text = raw_reply.replace("[ERROR]", "").strip()
+                reply_text = "連線稍微卡住了，解題進度已保留！\n請再輸入一次你剛剛算出的「答案」，讓我驗證一下。"
 
         # ----------------------------------------------------
         # 狀態 3：驗證陷阱題
@@ -164,13 +161,12 @@ def handle_message(event):
             使用者對陷阱題的回答是：【{user_msg}】
             
             請給予最終解答。邏輯要一針見血（絕對不能使用星號 * 排版）。
-            結尾請加上：「🎉 恭喜通關！輸入『重新開始』來挑戰下一題。」
+            結尾請加上：「恭喜通關！輸入『重新開始』來挑戰下一題。」
             """
             raw_reply = get_ai_response(prompt)
             
-            # 攔截並過濾 ERROR 標籤
             if "[ERROR]" in raw_reply:
-                reply_text = raw_reply.replace("[ERROR]", "").strip()
+                reply_text = "就差最後一步了，系統剛好卡住！\n請再傳送一次你的「最終答案」，我們完成這題。"
             else:
                 reply_text = raw_reply
                 session["state"] = 4 
@@ -180,9 +176,8 @@ def handle_message(event):
 
     except Exception as e:
         print(f"Main Loop Error: {e}", file=sys.stderr)
-        reply_text = "系統發生未預期錯誤，請輸入「重新開始」重試一次。"
+        reply_text = "系統發生未預期錯誤，但進度已保存。請再傳送一次剛剛的對話內容！"
 
-    # 將最終回覆傳回 LINE
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_text)
