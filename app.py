@@ -80,7 +80,7 @@ def handle_message(event):
         """
         
         response = client.models.generate_content(
-            model='gemini-2.5-flash', 
+            model='gemini-1.5-flash', 
             contents=prompt,
             config=types.GenerateContentConfig(temperature=0.1) 
         )
