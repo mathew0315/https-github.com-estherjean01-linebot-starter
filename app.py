@@ -27,7 +27,7 @@ line_config   = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 MIN_LENGTH      = 5
-IGNORE_PREFIXES = ["/", "!"]
+IGNORE_PREFIXES = []
 MAX_INPUT_CHARS = 3000
 
 
