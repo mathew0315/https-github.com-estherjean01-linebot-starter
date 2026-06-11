@@ -21,17 +21,21 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # 初始化 Google GenAI 用戶端
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ==================== 核心 Prompt 設計 (純情境 B：解題提示) ====================
+# ==================== 建立記憶體 ====================
+# 【關鍵新增】用一個字典來儲存每位使用者的專屬對話記憶
+user_sessions = {}
+
+# ==================== 核心 Prompt 設計 ====================
 SYSTEM_INSTRUCTION = """
-你是一位經驗豐富、充滿耐心的「解題提示 AI 教學助理」。
-當學生詢問任何學科的題目時，你的目標是帶領學生釐清觀念、自主破題，絕對不能直接提供標準答案或完整程式碼。請嚴格執行以下四階段引導歷程：
+你是一位專業的「解題提示 AI 教學助理」。請嚴格遵循以下「四階段引導」與使用者進行【多輪對話】。
+⚠️ 核心鐵則：絕對不要一次把所有步驟講完！每次「只能進行一個階段」，結尾必須拋出問題並「等待使用者回答」，才能進入下一階段。絕對不給最終答案。
 
-1. 【診斷問題與拆解題目】：請學生用自己的話描述題目想求什麼，並指出題目給了哪些已知條件。
-2. 【連結已知觀念】：提示相關的概念、公式、定理或邏輯架構，引導學生從大腦尋找工具箱，但不直接套用。
-3. 【嘗試第一步】：鼓勵學生寫出初步的列式或邏輯。如果卡住，用反問引導他發現矛盾，每次回覆只推進一個步驟。
-4. 【觀念總結與內化】：當學生得出正確答案後，要求他用一句話總結解題核心，並給出一個微調條件的類似觀念提問讓他舉一反三。
+1. 【分析與拆解】：指出核心考點，幫使用者抓出「已知條件」與「要求目標」。問使用者準備好開始了嗎？
+2. 【尋找工具箱】：給出選項（例如 A 或 B 公式）或提示，詢問使用者覺得該用哪一個。等待使用者回答 A 或 B。
+3. 【嘗試第一步】：確認使用者選對後，請他們將數字代入公式計算，並回覆結果。等待使用者算出數字。
+4. 【觀念總結與驗證】：驗證使用者的計算，最後給出一個微調條件的「終點挑戰（陷阱題）」，等使用者回答後再給予結業鼓勵。
 
-注意：用肯定、直觀的語言建立信心。如果學生索要答案，請溫和拒絕並給予更微小的提示。每次回覆保持精簡，字數不超過 150 字。
+語氣：直觀有力、充滿鼓勵。記住，你是在對話，不是在寫報告。
 """
 
 # ==================== Webhook 進入點 ====================
@@ -52,34 +56,35 @@ def handle_message(event):
     user_msg = event.message.text
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # 預設回覆
-    reply = "助理正在思考如何引導你，請稍等..."
-    
-    try:
-        # 呼叫 Gemini-2.5-flash，載入解題引導指令
-        response = client.models.generate_content(
+    # 【關鍵修改：啟動對話記憶】
+    # 如果這個使用者是第一次傳訊息，幫他開一個專屬的 Chat Session
+    if user_id not in user_sessions:
+        user_sessions[user_id] = client.chats.create(
             model='gemini-2.5-flash',
-            contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.7
             )
         )
+    
+    # 取得該使用者的專屬聊天室（帶有歷史記憶）
+    chat_session = user_sessions[user_id]
+    
+    try:
+        # 使用 chat_session.send_message 來延續對話，而不是 generate_content
+        response = chat_session.send_message(user_msg)
         
-        # 安全檢查
         if response and response.text:
             reply = response.text
         else:
-            # 修正 1：移除時事分析字眼，改回純粹的解題引導
-            reply = "這題看起來很有挑戰性！先別急著要答案，你可以告訴我，題目目前給了你哪些已知線索嗎？"
+            reply = "這題看起來很有挑戰性！你可以告訴我，題目目前給了你哪些已知線索嗎？"
             
     except Exception as e:
         print(f'Gemini error: {e}', file=sys.stderr)
-        # 修正 2：移除台積電與魏董事長的硬編碼，改為通用的解題防錯防護
         reply = "助理的腦袋剛剛稍微卡住了一下！我們回到這題，你能試著列出你的第一步算式或想法讓我看看嗎？"
     
     # 【對話紀錄蒐集】
-    log_record = f"[{timestamp}] [{user_id}] -> Q: {user_msg.replace('\n', ' ')[:50]}... | A: {reply.replace('\n', ' ')}"
+    log_record = f"[{timestamp}] [{user_id}] -> Q: {user_msg.replace(chr(10), ' ')[:50]}... | A: {reply.replace(chr(10), ' ')}"
     print(log_record, file=sys.stdout)
     sys.stdout.flush()
 
