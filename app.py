@@ -20,21 +20,21 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 user_sessions = {}
 
 def get_ai_response(prompt):
-    """加入 try-except，防止 API 異常或安全阻擋直接弄崩整個系統"""
+    """加入 try-except，防止 API 異常，並回傳帶有 [ERROR] 標籤的字串供主程式辨識"""
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-2.5-flash', # 若持續報錯，可嘗試改為 'gemini-1.5-flash' 或 'gemini-2.0-flash'
             contents=prompt,
             config=types.GenerateContentConfig(temperature=0.2) 
         )
-        # 確保有文字回傳
         if response and response.text:
             return response.text.strip()
         else:
-            return "[ERROR]\nAPI 回傳為空，可能是被安全機制阻擋。"
+            return "[ERROR] AI 回傳為空，可能是被安全機制阻擋了，請換個說法試試。"
     except Exception as e:
+        # 真正的報錯原因會印在這裡，請查看伺服器後台 Log
         print(f"API Error: {e}", file=sys.stderr)
-        return "[ERROR]\n連線或生成失敗，請稍後重試。"
+        return "[ERROR] 哎呀，API 連線似乎遇到一點阻礙。請稍後再試一次！"
 
 @app.route("/webhook", methods=['POST'])
 def webhook():
@@ -85,9 +85,13 @@ def handle_message(event):
             設計一個選擇題 (選項 A 與 B)，一個正確，一個是常見陷阱。
             結尾加上：「請回覆 A 或 B，選擇你的破題工具！」
             """
-            reply_text = get_ai_response(prompt)
+            raw_reply = get_ai_response(prompt)
             
-            if not reply_text.startswith("[ERROR]"):
+            # 攔截並過濾 ERROR 標籤
+            if "[ERROR]" in raw_reply:
+                reply_text = raw_reply.replace("[ERROR]", "").strip()
+            else:
+                reply_text = raw_reply
                 session["history"] += f"題目：{user_msg}\nAI提問：{reply_text}\n"
                 session["state"] = 1
 
@@ -110,6 +114,7 @@ def handle_message(event):
             """
             raw_reply = get_ai_response(prompt)
             
+            # 解析狀態碼，並確保消除所有系統標籤
             if "[PASS]" in raw_reply:
                 reply_text = raw_reply.replace("[PASS]", "").strip()
                 session["history"] += f"使用者回答：{user_msg}\nAI回覆：{reply_text}\n"
@@ -139,6 +144,7 @@ def handle_message(event):
             """
             raw_reply = get_ai_response(prompt)
             
+            # 解析狀態碼，並確保消除所有系統標籤
             if "[PASS]" in raw_reply:
                 reply_text = raw_reply.replace("[PASS]", "").strip()
                 session["history"] += f"使用者回答：{user_msg}\nAI回覆：{reply_text}\n"
@@ -160,9 +166,13 @@ def handle_message(event):
             請給予最終解答。邏輯要一針見血（絕對不能使用星號 * 排版）。
             結尾請加上：「🎉 恭喜通關！輸入『重新開始』來挑戰下一題。」
             """
-            reply_text = get_ai_response(prompt)
+            raw_reply = get_ai_response(prompt)
             
-            if not reply_text.startswith("[ERROR]"):
+            # 攔截並過濾 ERROR 標籤
+            if "[ERROR]" in raw_reply:
+                reply_text = raw_reply.replace("[ERROR]", "").strip()
+            else:
+                reply_text = raw_reply
                 session["state"] = 4 
 
         elif current_state == 4:
