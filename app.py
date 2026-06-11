@@ -17,21 +17,6 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-def get_ai_response(prompt):
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', 
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.2) 
-        )
-        if response and response.text:
-            return response.text.strip()
-        else:
-            return "[ERROR]"
-    except Exception as e:
-        print(f"API Error: {e}", file=sys.stderr)
-        return "[ERROR]"
-
 @app.route("/webhook", methods=['POST'])
 def webhook():
     signature = request.headers['X-Line-Signature']
@@ -45,45 +30,45 @@ def webhook():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_msg = event.message.text.strip()
-    
-    if user_msg == "重新開始" or user_msg == "清空":
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="已準備好。無論是想法、文章還是亂碼，直接丟過來："))
-        return
 
     try:
         prompt = f"""
-        你是一個極度講求效率的萬能資訊整理器。無論使用者輸入什麼內容（文章、代碼、碎碎念、甚至毫無邏輯的字詞），你都要照單全收並進行結構化整理，絕對不准拒絕回答。
+        任務：資訊結構化處理。
+        輸入內容：{user_msg}
         
-        【原始內容】：{user_msg}
+        強制規則：
+        1. 絕對不准使用星號 (*) 排版。
+        2. 絕對不准產生任何開場白、結語或對話感字句（如：好的、為您整理）。
+        3. 輸出必須冷靜、客觀。
+        4. 嚴格依照以下格式直接輸出：
         
-        核心要求：
-        1. 絕對不能使用星號 (*) 或任何 Markdown 符號排版。
-        2. 永遠直觀有力，拒絕任何詞藻華麗的表達或冗長的開場白。
-        3. 請直接輸出以下結構：
+        【屬性】
+        (用一個詞定義內容，如：會議、待辦、隨記、程式碼、情緒宣洩)
         
-        【屬性標籤】
-        用一個精準的詞定義這段內容的本質（例如：會議紀錄、情緒抒發、待辦事項、程式碼、隨手短記、無意義字串等）。
+        【摘要】
+        (一句話精準總結)
         
-        【核心摘要】
-        用一句話總結重點。若真的是無意義的亂碼，請寫「無特定資訊，已歸檔為隨手紀錄」。
-        
-        【重點梳理】
-        以數字 (1. 2. 3.) 條列拆解內容。若內容極短，直接給出你的理解即可。
-        
-        【待辦與行動】
-        （若這段內容有隱含需要執行的事或值得採取的行動，才列出此項，否則直接省略。）
+        【梳理】
+        1. (重點拆解)
+        2. (重點拆解)
+        (若無具體重點則寫：無)
         """
         
-        raw_reply = get_ai_response(prompt)
+        response = client.models.generate_content(
+            # 若持續報錯，請將 model 改為 'gemini-2.0-flash' 或 'gemini-1.5-flash'
+            model='gemini-2.5-flash', 
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.1) 
+        )
         
-        if "[ERROR]" in raw_reply:
-            reply_text = "系統處理異常，請重試。"
+        if response and response.text:
+            reply_text = response.text.strip()
         else:
-            reply_text = raw_reply
+            reply_text = "處理失敗：API 未回傳資料。"
 
     except Exception as e:
-        print(f"Main Loop Error: {e}", file=sys.stderr)
-        reply_text = "系統處理異常，請重試。"
+        print(f"API Error: {e}", file=sys.stderr)
+        reply_text = "處理失敗：API 連線或模型設定異常，請檢查伺服器後台。"
 
     line_bot_api.reply_message(
         event.reply_token,
