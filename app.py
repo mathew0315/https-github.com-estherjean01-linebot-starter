@@ -9,7 +9,6 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# 讀取環境變數
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -33,7 +32,6 @@ def handle_message(event):
     user_msg = event.message.text.strip()
     reply_text = ""
 
-    # 1. 定義觸發關鍵字
     trigger_keywords = ["/筆記", "整理：", "幫我讀"]
     target_content = ""
     is_triggered = False
@@ -44,17 +42,14 @@ def handle_message(event):
             target_content = user_msg[len(keyword):].strip()
             break
 
-    # 2. 未觸發關鍵字，直接中斷執行
     if not is_triggered:
         return
 
-    # 3. 觸發了指令，但沒有提供內容
     if not target_content:
         reply_text = "已收到指令。請在關鍵字後方提供需要整理的內容。\n範例：/筆記 下午三點要開行銷會議。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    # 4. 執行核心閱讀與筆記邏輯
     try:
         prompt = f"""
         任務：獨立閱讀並結構化產出筆記，或給予補充提示。
@@ -79,7 +74,6 @@ def handle_message(event):
         (若無具體重點則寫：無延伸重點)
         """
         
-        # 改回正確的 2.5 版模型
         response = client.models.generate_content(
             model='gemini-2.5-flash', 
             contents=prompt,
@@ -100,17 +94,19 @@ def handle_message(event):
         error_msg = str(e)
         print(f"API Error: {error_msg}", file=sys.stderr)
         
-        # 新增 503 塞車防護機制
-        if "503" in error_msg:
+        # 新增 429 頻率限制防護
+        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            reply_text = "免費 API 呼叫太頻繁，請等待約半分鐘後再試一次。"
+        # 保留 503 塞車防護
+        elif "503" in error_msg:
             reply_text = "目前 AI 伺服器負載較高，請稍等一分鐘後再傳送一次。"
         else:
             reply_text = f"系統連線異常。\n錯誤詳情：{error_msg}"
 
-    # 5. 將最終結果發送回 LINE
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_text)
     )
 
 if __name__ == "__main__":
-    app.run()
+    app.run)
